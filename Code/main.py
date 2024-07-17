@@ -1,11 +1,3 @@
-"""
-Created on Sep 15th 18:05:53 2020
-
-Author: Qizhong Zhang
-
-Main Function
-"""
-
 import csv
 import datetime
 import os
@@ -19,7 +11,7 @@ from model import VAE
 from lstm import LSTMMODEL
 from baselines import SEMIMARKOV, HAWKES, TimeGeo, MoveSim
 from result_evaluation import EVALUATION
-
+os.chdir('TrajSynVAE/Code/')
 torch.set_default_tensor_type(torch.DoubleTensor)
 
 # Hyperparameters
@@ -27,12 +19,10 @@ class parameters(object):
 
     def __init__(self, args) -> None:
         super().__init__()
-        
         # Data-related
         self.data_type = args.data_type
         self.location_mode = args.location_mode
         self.trainsize = args.trainsize
-
         # Model-related
         self.model_type = args.model_type
         self.rnn_type = args.rnn_type
@@ -90,7 +80,8 @@ class parameters(object):
         self.feedback_ban =args.feedback_ban
 
         # checkpoint
-        self.save_path = './RES/' + str(datetime.datetime.now().strftime('%Y-%m%d-%H%M') + '/0/')
+        print(str(datetime.datetime.now().strftime('%Y-%m%d-%H%M')))
+        self.save_path = './results/' + str(self.trainsize) + '_' + str(self.data_type)+'/'
         self.param_name = [x for x in self.__dict__]
         self.param_value = [self.__dict__[v] for v in self.__dict__]
 
@@ -119,19 +110,18 @@ class parameters(object):
 
         self.infer_maxlast = data.infer_maxlast 
         
-
 if __name__ == '__main__':
     torch.autograd.set_detect_anomaly(True)
     parser = argparse.ArgumentParser()
 
     # Data-related
-    parser.add_argument('-d', '--data_type', type=str, default='ISP', choices=['ISP', 'GeoLife', 'FourSquare_NYC', 'FourSquare_TKY'])
-    parser.add_argument('-l', '--location_mode', type=int, default=0, choices=[0, 1, 2])
-    parser.add_argument('-t', '--trainsize', type=float, default=0.9)
+    parser.add_argument('-d', '--data_type', type=str, default='ccg', choices=['replica','spectus','ccg','replica'])
+    parser.add_argument('-l', '--location_mode', type=int, default=1, choices=[0, 1, 2])
+    parser.add_argument('-t', '--trainsize', type=float, default=0.8)
 
     # Model-related
     parser.add_argument('-m', '--model_type', type=str, default='VAE', choices=['VAE', 'LSTM'])
-    parser.add_argument('--rnn_type', type=str, default='LSTM', choices=['LSTM', 'GRU'])
+    parser.add_argument('--rnn_type', type=str, default='GRU', choices=['LSTM', 'GRU'])
     parser.add_argument('--rnn_layers', type=int, default=1)
     parser.add_argument('--rnn_bidirectional', type=bool, default=False)
     parser.add_argument('--dual_rnn', type=bool, default=False)
@@ -142,15 +132,15 @@ if __name__ == '__main__':
     parser.add_argument('--usr_emb_size', type=int, default=128)
     parser.add_argument('--d_model', type=int, default=256)
     # Encoder
-    parser.add_argument('--encoder_rnn_hidden_size', type=int, default=512)
+    parser.add_argument('--encoder_rnn_hidden_size', type=int, default=256)
     parser.add_argument('--z_hidden_size_mean', type=int, default=256)
     parser.add_argument('--z_hidden_size_std', type=int, default=256)
-    parser.add_argument('--latent_size', type=int, default=512)
+    parser.add_argument('--latent_size', type=int, default=256)
     # Regularization
     parser.add_argument('--layernorm', action='store_false')
     parser.add_argument('--dropout', type=float, default=0.2)
     # Decoder-Location
-    parser.add_argument('--decoder_rnn_hidden_size', type=int, default=512)
+    parser.add_argument('--decoder_rnn_hidden_size', type=int, default=256)
     parser.add_argument('--loc_hidden_size1', type=int, default=128)
     parser.add_argument('--loc_hidden_size2', type=int, default=128)
     parser.add_argument('--cdfpoi', action='store_false')
@@ -163,15 +153,15 @@ if __name__ == '__main__':
     parser.add_argument('--time_initial', type=float, default=100)
 
     # KL-annealing
-    parser.add_argument('--max_beta', type=float, default=0.5) # 1
-    parser.add_argument('--cycle', type=int, default=500) # 100
+    parser.add_argument('--max_beta', type=float, default=1) # 1
+    parser.add_argument('--cycle', type=int, default=100) # 100
     # Learning
     parser.add_argument('--learning_rate', type=float, default=1e-4)
     parser.add_argument('--L2', type=float, default=1e-5)
     parser.add_argument('--step_size', type=int, default=10)
     parser.add_argument('--gamma', type=float, default=0.5)
-    parser.add_argument('-e', '--epoches', type=int, default=50)
-    parser.add_argument('-b', '--batchsize', type=int, default=32)
+    parser.add_argument('-e', '--epoches', type=int, default=10)
+    parser.add_argument('-b', '--batchsize', type=int, default=8)
     # Unbalanced learning
     parser.add_argument('--tim_only', type=bool, default=False)
     parser.add_argument('--loc_only', type=bool, default=False)
@@ -190,11 +180,11 @@ if __name__ == '__main__':
     parser.add_argument('--tune', type=bool, default=False)
     parser.add_argument('--checkpoint', type=str, default=None)
     parser.add_argument('--generate', type=bool, default=False)
-    parser.add_argument('--run_baselines', type=bool, default=False)
+    parser.add_argument('--run_baselines', type=bool, default=True)
     parser.add_argument('--cuda', type=str, default='0', choices=['0', '1', '2', '3'])
 
     # hyperparameters and dataset
-    args = parser.parse_args()
+    args = parser.parse_args(args=[])
     param = parameters(args)
 
     data = MYDATA(param.data_type, param.location_mode)
@@ -205,39 +195,32 @@ if __name__ == '__main__':
 
     reform(trainset, 'train')
     reform(testset, 'test')
-
+    
     # Logging
-    os.makedirs(param.save_path[:-2])
-    with open(param.save_path[:-2] + 'result.csv', 'a', encoding='utf-8', newline='') as f:
+    if not os.path.exists(param.save_path):
+            os.makedirs(param.save_path)
+            os.makedirs(param.save_path + 'data')
+            os.makedirs(param.save_path + 'plots')
+    
+    with open(param.save_path + 'result.csv', 'a', encoding='utf-8', newline='') as f:
         csv_writer = csv.writer(f)
         csv_writer.writerow(param.param_name)
         csv_writer.writerow(param.param_value)
         csv_writer.writerow(['Method', 'travel_distance', 'radius', 'duration', 'G_rank', 'move', 'stay'])
 
     # Baselines
-    SM = []
     if param.run_baselines:
-        HK, TG, MS, jsd = [], [], [], []
-
+        HK, TG, SM, NG = [], [], [], []
+    
     for i in range(param.exptimes):
-
         # Baselines
-        SM.append(SEMIMARKOV(data.REFORM['train'], param.tim_size))
-        if param.run_baselines:
-            HK.append(HAWKES(data.REFORM['train'], param))
-            TG.append(TimeGeo(data.REFORM['train'], param))
-            MS.append(MoveSim(data, param, i))
-            jsd1 = EVALUATION(param, SM[i], HK[i], data.REFORM['test'], 'Semi Markov', 'Hawkes', 'jsd')
-            jsd2 = EVALUATION(param, TG[i], MS[i], data.REFORM['test'], 'TimeGeo', 'MoveSim', 'jsd')
-            jsd.append(np.concatenate([jsd1.values, jsd2.values], axis=0))
-            continue
-        print('Data Loaded')
-
-        # save_path
-        param.save_path = param.save_path[:-2] + str(i) + '/'
-        os.makedirs(param.save_path + 'plots')
-        os.makedirs(param.save_path + 'data')
-
+    
+        # if param.run_baselines:
+        #     HK.append(HAWKES(data.REFORM['train'], param))
+        #     TG.append(TimeGeo(data.REFORM['train'], param))
+        #     SM.append(SEMIMARKOV(data.REFORM['train'], param.tim_size))
+        #     NG.append(MoveSim(data, param, i))
+        
         # Model initialization
         if param.model_type == 'VAE':
             model = VAE(param) 
@@ -257,22 +240,10 @@ if __name__ == '__main__':
             model.run(trainset, testset)
 
         # Save results
-        np.save(param.save_path + 'data/original.npy', data.REFORM['test'])
-        np.save(param.save_path + 'data/Semi_Markov.npy', SM)
+        # np.save(param.save_path + 'data/Semi_Markov.npy', SM)
+        # np.save(param.save_path + 'data/TimeGeo.npy', TG)
+        # np.save(param.save_path + 'data/Hawkes.npy', HK)
+        # np.save(param.save_path + 'data/Base.npy', NG)
+        np.save(param.save_path + 'data/VAE.npy', data.GENDATA)
+        # np.save(param.save_path + 'data/LSTM.npy', data.GENDATA)
         
-    # Evaluation and Logging
-    print('Start Evaluation')
-    jsdtotal = []
-    for i in range(len(data.GENDATA)):
-        jsdtotal.append(EVALUATION(param, data.GENDATA[i], SM[i], data.REFORM['test'], 'Our Model', 'Semi Markov', 'plot'))
-        with open(param.save_path[:-2] + 'result.csv', 'a', encoding='utf-8', newline='') as f:
-            csv_writer = csv.writer(f)
-            csv_writer.writerow(['Semi_Markov', jsdtotal[-1]['travel_distance'][1], jsdtotal[-1]['radius'][1], jsdtotal[-1]['duration'][1],
-                                jsdtotal[-1]['G_rank'][1], jsdtotal[-1]['move'][1], jsdtotal[-1]['stay'][1]])
-            csv_writer.writerow(['Our', jsdtotal[-1]['travel_distance'][0], jsdtotal[-1]['radius'][0], jsdtotal[-1]['duration'][0],
-                                jsdtotal[-1]['G_rank'][0], jsdtotal[-1]['move'][0], jsdtotal[-1]['stay'][0]])
-
-    # Important Statistics
-    result = np.array([jsdtotal[i].values for i in range(len(jsdtotal))]) if not param.run_baselines else np.array(jsd)
-    for i in range(result.shape[1]):
-        print(result[:, i, :].mean(0), result[:, i, :].std(0))

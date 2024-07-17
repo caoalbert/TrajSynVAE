@@ -38,6 +38,9 @@ class MYDATA(Dataset):
         if NAME == 'GeoLife':
             self.NAME = NAME
             self.PATH = './data/' + self.NAME + '/' 
+        if NAME == 'ccg':
+            self.NAME = NAME
+            self.PATH = 'data/' + self.NAME + '/'
 
         # Load or pre-process
         self.EXIST = self.loaddata()
@@ -48,6 +51,9 @@ class MYDATA(Dataset):
                 Data = self.dfprepare_GL()
             if self.NAME == 'FourSquare':
                 Data = self.dfprepare_FS()
+            if self.NAME == 'ccg':
+                Data = self.dfprepare_CCG()
+    
             self.DATA = self.preprocess(Data)
 
         # Attributes preparation
@@ -106,6 +112,12 @@ class MYDATA(Dataset):
         Data = D[['userId', 'locId', 'absTime', 'timeDelta']]
         Data = Data.rename(columns={'userId': 'usr', 'locId': 'loc', 'absTime': 'tim', 'timeDelta': 'sta'})
         return Data
+    
+    def dfprepare_CCG(self):
+        df = pd.read_csv(self.PATH + 'TrajSynVAE_input.csv')
+        self.GPS = np.load(self.PATH + 'gps.npy')
+        self.POI = None
+        return df
 
     def dfprepare_GL(self):
         # Load
@@ -309,7 +321,7 @@ class MYDATA(Dataset):
 
         data2 = {}
         data = {}
-        for usr in data1:
+        for usr in tqdm(data1):
             data2[usr] = {}
             data[usr] = {}
             for tim in data1[usr]:
@@ -336,7 +348,7 @@ class MYDATA(Dataset):
             self.FILTEREDID = np.unique(np.sort(self.FILTEREDID)).astype(int)
 
             self.GPS = self.GPS[np.ix_(self.FILTEREDID)]
-            if self.NAME != 'GeoLife':
+            if self.NAME != 'ccg':
                 self.POI = self.POI[np.ix_(self.FILTEREDID)]
 
             self.DATA = {usr: self.DATA[usr] for usr in self.USERLIST}
@@ -347,13 +359,13 @@ class MYDATA(Dataset):
             
             np.save(self.PATH + 'DATA_' + self.LOCATION_MODE + '.npy', self.DATA)
             np.save(self.PATH + 'GPS_' + self.LOCATION_MODE + '.npy', self.GPS)
-            if self.NAME != 'GeoLife':
+            if self.NAME != 'ccg':
                 np.save(self.PATH + 'POI_' + self.LOCATION_MODE + '.npy', self.POI)
 
         self.IDX = np.cumsum([len(self.DATA[user]) for user in self.DATA])
 
         self.loc_size = self.GPS.shape[0]
-        self.poi_size = self.POI.shape[1] if self.NAME != 'GeoLife' else 0
+        self.poi_size = self.POI.shape[1] if self.NAME != 'ccg' else 0
         self.usr_size = len(self.USERLIST)
 
     # Load the data from existing files
@@ -362,7 +374,7 @@ class MYDATA(Dataset):
 
             self.DATA = np.load(self.PATH + 'DATA_' + self.LOCATION_MODE + '.npy', allow_pickle=True).item()
             self.GPS = np.load(self.PATH + 'GPS_' + self.LOCATION_MODE + '.npy', allow_pickle=True)
-            if self.NAME != 'GeoLife':
+            if self.NAME != 'ccg':
                 self.POI = np.load(self.PATH + 'POI_' + self.LOCATION_MODE + '.npy', allow_pickle=True)
             else:
                 self.POI = None
@@ -385,8 +397,9 @@ class MYDATA(Dataset):
     def split(self, testprop = 0.1, validprop = 0):
         idx = np.append(0, self.IDX)[:-1]
         trainid = np.unique(np.random.randint(idx, self.IDX, size=[2, idx.shape[0]]))
+        trainid = np.random.choice(trainid, replace=False, size=int((1-testprop)*trainid.shape[0]))
         remaining = np.setdiff1d(np.arange(self.IDX[-1]).astype(int), trainid)
-        testid = np.random.choice(remaining, replace=False, size=int(testprop*self.IDX[-1]))
+        testid = np.random.choice(trainid, replace=False, size=int(testprop*self.IDX[-1]))
         if int(validprop*self.IDX[-1]) > np.setdiff1d(remaining, testid).shape[0]:
             validid = np.setdiff1d(remaining, testid)
         else:

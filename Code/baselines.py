@@ -10,8 +10,45 @@ import numpy as np
 import random
 import math
 import time
+import pandas as pd
 from tqdm import tqdm
-from tick.hawkes import SimuHawkesExpKernels, HawkesExpKern
+# from tick.hawkes import SimuHawkesExpKernels, HawkesExpKern
+from types import FrameType, TracebackType
+from typing import Union, Any, Type, Optional
+import signal
+
+class SignalTimeout:
+    """Execute a code block raising a timeout."""
+
+    def __init__(self, timeout: Union[int, float]) -> None:
+        """
+        Constructor. Interrupt execution after `timeout` seconds.
+        """
+        self.timeout = timeout
+        self.old_handler: Any = signal.SIG_DFL
+        self.old_timeout = 0.0
+
+    def __enter__(self) -> Any:
+        """Begin of `with` block"""
+        # Register timeout() as handler for signal 'SIGALRM'"
+        self.old_handler = signal.signal(signal.SIGALRM, self.timeout_handler)
+        self.old_timeout, _ = signal.setitimer(signal.ITIMER_REAL, self.timeout)
+        return self
+
+    def __exit__(self, exc_type: Type, exc_value: BaseException,
+                 tb: TracebackType) -> None:
+        """End of `with` block"""
+        self.cancel()
+        return  # re-raise exception, if any
+
+    def cancel(self) -> None:
+        """Cancel timeout"""
+        signal.signal(signal.SIGALRM, self.old_handler)
+        signal.setitimer(signal.ITIMER_REAL, self.old_timeout)
+
+    def timeout_handler(self, signum: int, frame: Optional[FrameType]) -> None:
+        """Handle timeout (SIGALRM) signal"""
+        raise TimeoutError()
 
 '''
 Semi-Markov Model
@@ -55,7 +92,6 @@ def SMM_fit(trajs):
         transfer[i, :] = (transfer[i, :] + 0.1)
     
     return transfer, LAMBDA, Lambda, max_locs, detrans
-
 
 # Model generating
 def SMM_inference(max_last, transfer, LAMBDA, Lambda, max_locs, detrans):
@@ -107,7 +143,7 @@ def hawkes_process(trajs, tim_size, ntrajs=7):
     # Encode the location ids for better performance
     locations = np.sort(np.unique(np.concatenate([trajs[traj]['loc'] for traj in trajs])))
     # Too much locations will heavily slow down the fitting and it's highly possible to get a underfitted model
-    if locations.shape[0] > 200:
+    if locations.shape[0] > 100:
         return {}
     trans = lambda x:np.where(locations == x)[0][0]
     detrans = lambda x:locations[x]
@@ -119,24 +155,29 @@ def hawkes_process(trajs, tim_size, ntrajs=7):
     for id, eve in enumerate(events):
         train_user[eve] = np.append(train_user[eve], timestamps[id])
     
+    decay = 0.1
     # Fitting
-    learner = HawkesExpKern(0.1)
+    learner = HawkesExpKern(decay)
     try: 
         learner.fit(train_user)
     except ZeroDivisionError:
         return {}
+
     base = learner.baseline
+    if len(base[base > 0])==0:
+        return {}
+    
     base = np.where(base == 0, base[base > 0].mean() / 10, base)
 
     # Generating
     output = {}
-    for i in range(ntrajs):
 
+    for i in range(ntrajs):
         # Get raw sequences
-        simulator = SimuHawkesExpKernels(adjacency=learner.adjacency, decays=0.1, baseline=base, verbose=False, end_time=1440, force_simulation=True, max_jumps=1000)
+        simulator = SimuHawkesExpKernels(adjacency=learner.adjacency, decays=decay, baseline=base, verbose=False, end_time=1440, force_simulation=True, max_jumps=100)
         simulator.simulate()
         syn = simulator.timestamps
-        
+
         # Get sequences of standard form
         if np.sum([len(loc) for loc in syn]) == 0:
             continue
@@ -151,15 +192,17 @@ def hawkes_process(trajs, tim_size, ntrajs=7):
             continue
         result = np.concatenate((hawkes[:-1, :].T, [hawkes[1:, 1] - hawkes[:-1, 1]]), axis=0).T
         output[len(output)] = {'loc': result[:, 0].astype(int), 'tim': result[:, 1], 'sta': result[:, 2]}
-    
+
     return output
 
+def handle_timeout(signum, frame):
+    raise TimeoutError
 
 # Generate trajectories for all users
 def HAWKES(data, param):
-
     Hawkes = {}
     gen_bar = tqdm(data)
+    
     for user in gen_bar:
         gen_bar.set_description("Hawkes - Generating trajectories for user: {}".format(user))
         Hawkes[user] = hawkes_process(data[user], param.tim_size, param.ntrajs)
@@ -171,21 +214,22 @@ TimeGeo Model
 
 class Time_geo(object):
 
-    def __init__(self, region_input, pop_input, p_t_raw=None, pop_num=7, time_slot=10, rho=0.6, gamma=0.41, alpha=1.86, n_w=6.1, beta1=3.67, beta2=10, simu_slot=144):
+    def __init__(self, region_input, pop_input, data = None, p_t_raw=None, pop_num=7, time_slot=10, rho=0.6, gamma=0.41, alpha=1.86, n_w=6.1, beta1=3.67, beta2=10, simu_slot=144):
         
         super().__init__()
         self.time_slot = time_slot # time resolution is half an hour
         self.rho = rho # it controls the exploration probability for other regions
         self.gamma = gamma # it is the attenuation parameter for exploration probability
         self.alpha = alpha # it controls the exploration depth
-        self.n_w = n_w # it is the average number of tour based on home a week.
+        self.n_w = n_w # it is the average number of tour based on home a week
         self.beta1 = beta1 # dwell rate
         self.beta2 = beta2 # burst rate
         self.simu_slot = simu_slot
         self.pop_num = pop_num
+        self.data = data
 
         self.sample_region = region_input
-        p_t_raw = p_t_raw if p_t_raw is not None else np.load('./timegeo/rhythm.npy', allow_pickle=True)
+        p_t_raw = p_t_raw if p_t_raw is not None else np.load('../../humob/rhythm.npy', allow_pickle=True)
         self.p_t = np.array(p_t_raw).reshape(-1, (time_slot // 10)).sum(axis=1)
         self.region_num = self.sample_region.shape[0]
         self.home_location = np.random.choice(len(pop_input), pop_num, p=pop_input)
@@ -300,10 +344,11 @@ class Time_geo(object):
                 next_location = simu_trace[-1][0]
             simu_trace.append([next_location, now_time])
         return simu_trace
-    
+            
     def trace_simulate(self):
         pop_info = []
         for i in range(self.pop_num):
+            # self.update_parameter(i)
             pop_info.append({'n_w': self.n_w, 'beta1': self.beta1, 'beta2': self.beta2, 'home': self.home_location[i],
                             'feature': {'move_num': 0, 'move_distance': 0}, 'region_history': {}})
             pop_info[i]['trace'] = np.array(self.individual_trace_simulate(pop_info[i], 1621785600, self.simu_slot))
@@ -342,8 +387,7 @@ def TimeGeo(data, param):
         detrans = lambda x:locations[x]
 
         input = np.array([to_fixed({'loc': list(map(trans, traj['loc'])), 'tim': traj['tim'], 'sta': traj['sta']}, param.tim_size, 10) for traj in trajs.values()])
-
-        time_geo = Time_geo(param.GPS[np.ix_(locations)], np.bincount(input.flatten()) / np.cumprod(input.shape)[-1], simu_slot=param.tim_size//10)
+        time_geo = Time_geo(param.GPS[np.ix_(locations)], np.bincount(input.flatten()) / np.cumprod(input.shape)[-1], data=data, simu_slot=param.tim_size//10)
         TG[uid] = {id: to_std(r['trace'][:, 0], param.tim_size, detrans) for id, r in enumerate(time_geo.pop_info)}
     return TG
 

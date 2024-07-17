@@ -38,6 +38,7 @@ class ABS_TIM_EMB(nn.Module):
 
     def forward(self, x):
         a = torch.div(torch.arange(0.0, self.d_model), 2, rounding_mode='floor').to(self.device) * 2 / self.d_model
+        x = x.double()
         b = torch.matmul(x.unsqueeze(-1), (2 * np.pi / 1440) * a.unsqueeze(0)) if not self.fourier else \
             torch.matmul(x.unsqueeze(-1), (1e-4 ** a).unsqueeze(0))
         c = torch.zeros_like(b)
@@ -540,7 +541,6 @@ class VAE(nn.Module):
             # Generating
             X = {'loc': [], 'tim': [t], 'sta': []}
             for i in range(1, 1000):
-
                 time = torch.tensor(np.array(X['tim']).T, dtype=torch.double).to(self.device)
                 usr_emb0 = self.emb_usr0(usr[:, :i])
                 pos_emb0 = self.emb_pos0(time)
@@ -643,10 +643,10 @@ class VAE(nn.Module):
             for idx, bat in train_bar:
 
                 # Input
-                loc = bat['loc'].clone().detach().long().to(self.device)
-                tim = bat['sta'].clone().detach().double().to(self.device)
-                usr = bat['usr'].clone().detach().long().to(self.device)
-                pos = bat['tim'].clone().detach().double().to(self.device)
+                loc = bat['loc'].to(self.device)
+                tim = bat['sta'].to(self.device)
+                usr = bat['usr'].to(self.device)
+                pos = bat['tim'].to(self.device)
                 inseq = {'usr': usr, 'loc': loc, 'tim': tim, 'pos': pos, 'lengths': bat['lengths']}
 
                 # Output
@@ -681,47 +681,47 @@ class VAE(nn.Module):
                                             np.mean(loss_record[epoch]['LOSS'])))
 
             # Validation
-            if epoch % 1 == 0:
+            # if epoch % 1 == 0:
 
-                self.eval()
+            #     self.eval()
 
-                with torch.no_grad():
+            #     with torch.no_grad():
 
-                    valid_record[epoch] = {"LOSS": [], "KL": [], "LL_T": [], "LL_L": [], "LL_L0": [], "LL_T0": [], "weight" : []}
-                    mydataloader = DataLoader(validset, batch_size=self.batchsize, shuffle=False, num_workers=0, collate_fn=mycollatefunc)
-                    valid_bar = tqdm(enumerate(mydataloader))
-                    for idx, bat in valid_bar:
+            #         valid_record[epoch] = {"LOSS": [], "KL": [], "LL_T": [], "LL_L": [], "LL_L0": [], "LL_T0": [], "weight" : []}
+            #         mydataloader = DataLoader(validset, batch_size=self.batchsize, shuffle=False, num_workers=0, collate_fn=mycollatefunc)
+            #         valid_bar = tqdm(enumerate(mydataloader))
+            #         for idx, bat in valid_bar:
 
-                        # Input
-                        loc = bat['loc'].clone().detach().long().to(self.device)
-                        tim = bat['sta'].clone().detach().double().to(self.device)
-                        usr = bat['usr'].clone().detach().long().to(self.device)
-                        pos = bat['tim'].clone().detach().double().to(self.device)
-                        inseq = {'usr': usr, 'loc': loc, 'tim': tim, 'pos': pos, 'lengths': bat['lengths']}
+            #             # Input
+            #             loc = bat['loc'].clone().detach().long().to(self.device)
+            #             tim = bat['sta'].clone().detach().double().to(self.device)
+            #             usr = bat['usr'].clone().detach().long().to(self.device)
+            #             pos = bat['tim'].clone().detach().double().to(self.device)
+            #             inseq = {'usr': usr, 'loc': loc, 'tim': tim, 'pos': pos, 'lengths': bat['lengths']}
 
-                        # Output
-                        mean, std, lout, tout = self.forward(inseq)
+            #             # Output
+            #             mean, std, lout, tout = self.forward(inseq)
 
-                        # Loss
-                        KL, LL_L, LL_T, LOSS, LL_L0, LL_T0 = self.loss(mean, std, lout, tout, inseq, weight=weight, beta=beta)
+            #             # Loss
+            #             KL, LL_L, LL_T, LOSS, LL_L0, LL_T0 = self.loss(mean, std, lout, tout, inseq, weight=weight, beta=beta)
 
-                        # Loss record
-                        valid_record[epoch]['KL'].append(KL.item())
-                        valid_record[epoch]['LL_L'].append(LL_L.item())
-                        valid_record[epoch]['LL_T'].append(LL_T.item())
-                        valid_record[epoch]['LOSS'].append(LOSS.item())
-                        valid_record[epoch]['LL_L0'].append(LL_L0.item())
-                        valid_record[epoch]['LL_T0'].append(LL_T0.item())
+            #             # Loss record
+            #             valid_record[epoch]['KL'].append(KL.item())
+            #             valid_record[epoch]['LL_L'].append(LL_L.item())
+            #             valid_record[epoch]['LL_T'].append(LL_T.item())
+            #             valid_record[epoch]['LOSS'].append(LOSS.item())
+            #             valid_record[epoch]['LL_L0'].append(LL_L0.item())
+            #             valid_record[epoch]['LL_T0'].append(LL_T0.item())
 
-                        valid_bar.set_description('Validation epoch: {}, Index: {}, KL: {:.5f}, LL_L: {:.5f}, LL_L0: {:.5f}, LL_T: {:.5f}, LL_T0: {:.5f}, ELBO: {:.5f}'.format\
-                                            (epoch, idx, np.mean(valid_record[epoch]['KL']),
-                                                np.mean(valid_record[epoch]['LL_L']),
-                                                np.mean(valid_record[epoch]['LL_L0']),
-                                                np.mean(valid_record[epoch]['LL_T']),
-                                                np.mean(valid_record[epoch]['LL_T0']),
-                                                np.mean(valid_record[epoch]['LOSS'])))
+            #             valid_bar.set_description('Validation epoch: {}, Index: {}, KL: {:.5f}, LL_L: {:.5f}, LL_L0: {:.5f}, LL_T: {:.5f}, LL_T0: {:.5f}, ELBO: {:.5f}'.format\
+            #                                 (epoch, idx, np.mean(valid_record[epoch]['KL']),
+            #                                     np.mean(valid_record[epoch]['LL_L']),
+            #                                     np.mean(valid_record[epoch]['LL_L0']),
+            #                                     np.mean(valid_record[epoch]['LL_T']),
+            #                                     np.mean(valid_record[epoch]['LL_T0']),
+            #                                     np.mean(valid_record[epoch]['LOSS'])))
                         
-                self.train()
+            #     self.train()
 
             # Reduce the learning rate and adjusting the weight
             weight = 1 / (1 + np.var(loss_record[epoch]['LL_L']) / np.var(loss_record[epoch]['LL_T']))
